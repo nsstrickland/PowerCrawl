@@ -8,6 +8,8 @@
 # .DESCRIPTION: PowerCrawl
 #>
 
+#TODO: Rework the effects system... it's a little too complicated at this point, can probably be simplified.
+
 #Statistic Base Class
 #TODO: Determine how skills fit into the mix
 [Flags()] enum Stat {
@@ -48,14 +50,17 @@ class ActionableStat {
     }
     [void]IncrementValue() {
         $this.Value++
-        $this.Modifier = [System.Math]::Round(($this.Value - 10) / 2)
+        $this.RefreshModifier()
     }
     [void]IncreaseValue([int]$Amount) {
         $this.Value+=$Amount
-        $this.Modifier = [System.Math]::Round(($this.Value - 10) / 2)
+        $this.RefreshModifier()
     }
-    [void]Decrease([int]$Amount) {
+    [void]DecreaseValue([int]$Amount) {
         $this.Value-=$Amount
+        $this.RefreshModifier()
+    }
+    [void]RefreshModifier() {
         $this.Modifier = [System.Math]::Round(($this.Value - 10) / 2)
     }
     [int]AbilityCheck() {
@@ -159,7 +164,12 @@ class StatBlock {
     [void]RemoveEffect($Effect) {
         switch ($Effect.GetType().name) {
             "StatEffect" {
-                    $this.Effects = $this.Effects | Where-Object {$_.SourceObject -ne $Effect.SourceObject}
+                [Stat].GetEnumValues() | ForEach-Object -Process {
+                    if ($Effect.Stat -band $_) {
+                        $this.$_.DecreaseValue($Effect.Value)
+                        $this.Effects = $this.Effects | Where-Object {$_.SourceObject -ne $Effect.SourceObject}
+                    }
+                }
             }
         }
     }
@@ -167,7 +177,7 @@ class StatBlock {
         #temp formula plugins
         [int]$MonsterXP=45 #Average experience granted by base monster, TBD by location
         [int]$Difficulty=1 #Difficulty factor (reference model starts an exponential increase at ~30), leaving at 1 for now
-        [int]$ReductionFactor=1 #Difficulty factor reduction, completely TBD, needs to be fine-tuned
+        [double]$ReductionFactor=0.5 #Difficulty factor reduction, completely TBD, needs to be fine-tuned
         $this.LevelIncrement = (((8 * $this.Level) + ($Difficulty * $this.Level)) * ($MonsterXP * $this.Level) * ($ReductionFactor * $this.Level))
     }
 }
@@ -288,11 +298,6 @@ $atk = [Creature]::new("Monster",12,10,1)
 $obj.Attack($atk)
 #>
 $obj=[StatBlock]::new(10, 10, 10, 10, 10, 10, 1)
-#$obj = [Stat]::new("Strength",15)  
-#$b=[Stat]::new("Strength",2,"Race - Orc")
-#$d=[Stat]::new("Strength",2,"Race - Orc")
-#$c=[Stat]::new("Strength",2,"Class - Fighter")
-#$obj.AddBonus($b)
-#$obj.AddBonus($d)
-#$obj.AddBonus($c)
-$obj
+$i=[StatEffect]::new("Witch's Poison",[Stat]::Constitution, -3, [EffectSource]::Disease,"Witch","Poison applied from a witch's blade")
+$obj.AddEffect($i)
+$obj.RemoveEffect($i)
