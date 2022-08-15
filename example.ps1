@@ -3,22 +3,43 @@
 # Created: Tuesday June 25th 2019
 # Author: nsstrickland
 # -----
-# Last Modified: Tuesday, 25th June 2019 6:46:08 pm
+# Last Modified: Sunday, 14th August 2022 1:29:59 am
 # ----
 # .DESCRIPTION: PowerCrawl
+#
 #>
 
-#TODO: Rework the effects system... it's a little too complicated at this point, can probably be simplified.
+#Requires -Version 7.2
+
+# TODO: Rework the effects system... it's a little too complicated at this point, can probably be simplified.
+# We settled on full-text based
+# Figure out movement and construct a command interpreter
+# Construct basic map
+# Populate map with basics:
+#  - Monsters
+#  - Lootable containers
+#  - Obstacles (walls, trees, rocks)
+#  - 
 
 #Statistic Base Class
 #TODO: Determine how skills fit into the mix
 [Flags()] enum Stat {
-    Strength=1
-    Dexterity=2
-    Constitution=4
-    Intelligence=8
-    Wisdom=16
-    Charisma=32
+    Strength=1;
+    Dexterity=2;
+    Constitution=4;
+    Intelligence=8;
+    Wisdom=16;
+    Charisma=32;
+}
+[Flags()] enum Direction {
+    North=1;
+    South=2;
+    East=4;
+    West=8;
+    Northeast=16;
+    Northwest=32;
+    Southeast=64;
+    Southwest=128;
 }
 
 class ActionableStat {
@@ -127,12 +148,12 @@ class StatBlock {
         [int]$Charisma,
         [int]$Level
     ) {
-        $this.Strength = [ActionableStat]::new("Strength",$Strength)
-        $this.Dexterity = [ActionableStat]::new("Dexterity",$Dexterity)
-        $this.Constitution = [ActionableStat]::new("Constitution",$Constitution)
-        $this.Intelligence = [ActionableStat]::new("Intelligence",$Intelligence)
-        $this.Wisdom = [ActionableStat]::new("Wisdom", $Wisdom)
-        $this.Charisma = [ActionableStat]::new("Charisma",$Charisma)
+        $this.Strength = [ActionableStat]::new([Stat]"Strength",$Strength)
+        $this.Dexterity = [ActionableStat]::new([Stat]"Dexterity",$Dexterity)
+        $this.Constitution = [ActionableStat]::new([Stat]"Constitution",$Constitution)
+        $this.Intelligence = [ActionableStat]::new([Stat]"Intelligence",$Intelligence)
+        $this.Wisdom = [ActionableStat]::new([Stat]"Wisdom", $Wisdom)
+        $this.Charisma = [ActionableStat]::new([Stat]"Charisma",$Charisma)
         $this.Level = $Level
         $this.CalculateLevelIncrement()
     }
@@ -226,17 +247,14 @@ class Equipment:Item {
 class Creature {
     [string]$Name;
     [StatBlock]$StatBlock;
-
+    [Tile]$Location;
 
     Creature (
         [string]$Name,
-        [int]$Strenth,
-        [int]$Vitality,
         [int]$Level
     ) {
         $this.Name = $Name;
-        $this.Stats = [StatBlock]::new($Strenth, $Vitality, $Level)
-        $this.Health = ($this.Stats.Vitality / 2)
+        $this.StatBlock = [StatBlock]::new(10,10,10,10,10,10,$Level)
     }
     
     [void]EquipItem([Weapon]$ItemToAdd) {
@@ -255,6 +273,21 @@ class Creature {
     }
     [string]ToString() {
         return ($this.Name + "hp:" + $this.Health)
+    }
+    [bool]Move(
+        [Direction]$Direction
+        ) {
+            if (-not $this.Location) {
+                return $False
+            } else {
+                try {
+                    $this.Location.MoveCreature($this,$Direction)
+                    return $true
+                }
+                catch {
+                    return $False
+                }
+            }
     }
 }
 #Event for attacks-- it will act on both the target and the source, modifying health and exp
@@ -292,12 +325,152 @@ class Weapon {
     }
 }
 
+
+
+class Coordinator {
+    # Acts as a notifier to individual objects' AI funcions
+}
+
+class Tile {
+    [Creature[]]$Creatures
+    [Area]$ParentArea
+    [hashtable]$Coordinates
+    [bool]$Traversible
+    [string]$Description
+
+    Tile (
+        [Area]$Area,
+        [Hashtable]$Coordinates,
+        [bool]$Traversible,
+        [string]$Description
+    ) {
+        $this.ParentArea=$Area
+        $this.Coordinates=$Coordinates
+        $this.Traversible=$Traversible
+        $this.Description=$Description
+    }
+    [bool]MoveCreature(
+        [Creature]$Creature,
+        [Direction]$Direction
+    ) {
+        if ($this.Creatures -notcontains $Creature) {
+            return $False
+        }
+        $X=$null;$Y=$null
+        switch ($Direction) {
+            'North'     {$X=0;$Y=-1};
+            'South'     {$X=0;$Y=1};
+            'East'      {$X=1;$Y=0};
+            'West'      {$X=-1;$Y=0};
+            'Northeast' {$X=1;$Y=-1};
+            'Northwest' {$X=-1;$Y=-1};
+            'Southeast' {$X=1;$Y=1};
+            'Southwest' {$X=-1;$Y=1};
+        }
+        if ( ($null -ne $X) -and ($null -ne $Y)) {
+            $movingTo=$this.ParentArea.Tiles[($this.Coordinates.X+$X),($this.Coordinates.Y+$Y)]
+            if ($movingTo.Traversible -eq $True) {
+                try { 
+                    $this.Creatures = $this.Creatures | Where-Object {$_ -ne $Creature}
+                    $movingTo.Creatures+=$Creature
+                    $Creature.Location=$movingTo
+                    return $True
+                }
+                catch {
+                    Write-Host
+                    return $False
+                }
+            } else {
+                return $False
+            }
+        } else {
+            #Something went wrong
+            return $false
+        }
+    }
+}
+
+class Area {
+    # Grouping of tiles, can be held inside of tiles recursively
+    [string]$Name
+    [string]$Description
+    
+    [System.Collections.Hashtable]$Bounds=@{X=5;Y=5}
+    [Object[,]]$Tiles
+    [Zone]$ParentZone
+
+    Area ( #Creates a blank area with defined bounds
+        [string]$Name,
+        [string]$Description,
+        [int]$BoundsX,
+        [int]$BoundsY
+    ) {
+        $this.Name = $Name
+        $this.Description = $Description
+        $this.Bounds=@{X=$BoundsX;Y=$BoundsY}
+        $this.Tiles=New-Object 'object[,]' $BoundsX,$BoundsY
+    }
+    [bool]addTile(
+        [int]$X,
+        [int]$Y,
+        [bool]$Traversible,
+        [string]$Description
+    ) {
+        try {
+            $this.Tiles[$X,$Y]=[Tile]::new($this,@{X=${X};Y=${Y}},$Traversible,$Description)
+            return $True
+        }
+        catch {
+            Write-Output $_
+            return $false
+
+        }
+    }
+}
+
+class Zone {
+    #Grouping of Areas
+}
+
+function basicInterpreter {
+    $ExitGame=$false
+    $substitutes=@{
+        left='West'
+        right='East'
+        up='North'
+        down='South'
+        go='move'
+        walk='move'
+        run='move'
+        goto='move'
+    }
+    while ($ExitGame -eq $false) {
+        $player=$null;
+        $player=Read-Host -Prompt "> "
+        $words=$player.Normalize().split(' ')
+        foreach ($word in $words) {
+            $word=$substitutes[$word]
+        }
+    }
+}
+
 <#
-$obj=[Creature]::new("Player",12,10,1)
 $atk = [Creature]::new("Monster",12,10,1)
 $obj.Attack($atk)
 #>
-$obj=[StatBlock]::new(10, 10, 10, 10, 10, 10, 1)
-$i=[StatEffect]::new("Witch's Poison",[Stat]::Constitution, -3, [EffectSource]::Disease,"Witch","Poison applied from a witch's blade")
-$obj.AddEffect($i)
-$obj.RemoveEffect($i)
+#$obj=[StatBlock]::new(10, 10, 10, 10, 10, 10, 1)
+#$i=[StatEffect]::new("Witch's Poison",[Stat]::Constitution, -3, [EffectSource]::Disease,"Witch","Poison applied from a witch's blade")
+#$obj.AddEffect($i)
+#$obj.RemoveEffect($i)
+<#
+$area=[Area]::new('Tavern','An old tavern',5,5)
+(0..4)|%{[char](65+$_)}|%{
+    $char=$null;$char=$_
+    (0..4)|%{$area.addTile([int]([char]$char-65),$_,$True,"Tile $char$_")}
+}
+
+$obj=[Creature]::new("Player",1)
+$obj.Location=$area.Tiles[0,0]
+$area.Tiles[0,0].Creatures+=$obj
+$area.Tiles[4,0].MoveCreature($obj,'East')
+#>
