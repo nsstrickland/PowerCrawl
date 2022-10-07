@@ -3,7 +3,7 @@
 # Created: Monday October 3rd 2022
 # Author: Nick Strickland
 # -----
-# Last Modified: Wednesday, 5th October 2022 12:17:56 am
+# Last Modified: Friday, 7th October 2022 1:45:47 am
 # ----
 # Copright 2022 Nick Strickland, nsstrickland@outlook.com>>
 # GNU General Public License v3.0 only - https://www.gnu.org/licenses/gpl-3.0-standalone.html
@@ -34,6 +34,102 @@ function Clear-ConsoleLine {
 
 }
 
+class contentBox {
+    [int]$Height;
+    [int]$Width;
+    [string[]]$Content;
+    [string[]]$RenderedContent;
+    hidden [string[]]$edgeCharacters;
+    hidden [int]$HostHeight=(Get-Host).UI.RawUI.BufferSize.Height;
+    hidden [int]$HostWidth=(Get-Host).UI.RawUI.BufferSize.Width;
+    hidden [int]$maxDrawWidth=($This.HostWidth/2);
+    hidden [int]$maxInteriorWidth=$this.maxDrawWidth-4;
+    hidden [int]$drawWidth;
+    hidden [int]$drawHeight=($This.HostHeight/2);
+    contentBox([string]$Content){
+        $this.edgeCharacters=@('╔','╗','╚','╝','║','═')
+        $this.processContent($Content)
+        $this.addTitle()
+        foreach ($line in $this.Content) {
+            $this.addBody($line)
+        }
+        $this.addEnd()
+    }
+    contentBox([string]$Title,[string]$Content){ #TODO: adjust width to title if content is shorter
+        $this.edgeCharacters=@('╔','╗','╚','╝','║','═')
+        $this.processContent($Content)
+        $this.addTitle($title)
+        foreach ($line in $this.Content) {
+            $this.addBody($line)
+        }
+        $this.addEnd()
+    }
+    contentBox(){
+        $this.edgeCharacters=@('╔','╗','╚','╝','║','═')
+    }
+    [void]processContent([string]$Content){
+        $maxWidth=$this.maxInteriorWidth
+        if ($Content.Length -ge $this.maxInteriorWidth) {
+            $this.Content = $Content -split "(.{$maxWidth})" | Where-Object {$_}
+            $this.drawWidth=$this.maxDrawWidth} else {
+               $this.Content=$Content
+                $this.drawWidth=[int]($Content.Length + 4)
+        }
+    }
+    [string]padString([string]$string,[string]$padChar) {
+        [int]$pad=([Math]::Max(0,$this.drawWidth/2) - [Math]::Ceiling($string.length / 2))
+        return [string]("{0}{1}{2}" -f ([string]$padChar*[int]$pad),$string,[string]($padChar*[int]($this.drawWidth-$pad-$string.Length))) 
+    }
+    [void]addBody([string]$string){
+        $this.RenderedContent+=[string]($this.edgeCharacters[4]+$this.padString($string,' ')+$this.edgeCharacters[4])
+    }
+    [void]addTitle([string]$string){
+        $this.RenderedContent+=[string]($this.edgeCharacters[0]+($this.padString($string,'═'))+$this.edgeCharacters[1])
+    }
+    [void]addTitle(){
+        $this.RenderedContent+=[string]($this.edgeCharacters[0]+($this.edgeCharacters[5]*([int]$this.drawWidth))+$this.edgeCharacters[1])
+    }
+    [void]addSubtitle([string]$string){
+        $this.RenderedContent+=[string]($this.edgeCharacters[4]+($this.padString($string,' ')).Replace($string,("$string`e[24m").Insert(0,"`e[4m"))+$this.edgeCharacters[4])
+    }
+    [void]addEnd(){
+        $this.RenderedContent+=[string]($this.edgeCharacters[2]+($this.edgeCharacters[5]*($this.drawWidth))+$this.edgeCharacters[3])
+    }
+    [string[]]ToString(){
+        return [string[]]$this.RenderedContent
+    }
+
+}
+
+class popupBox : contentBox {
+    hidden $originalCursorPosition;
+    
+    popupBox([string]$title,[string]$Content) {
+        $this.processContent($Content)
+        $this.addTitle($title)
+        $lineno=0
+        foreach ($line in $this.Content) {
+            $this.addBody($line)
+        }
+        $this.addEnd()
+    }
+
+    [void]render() {
+        $this.originalCursorPosition=[System.Console]::GetCursorPosition()
+        $renderPadX=([Math]::Max(0,$this.HostWidth/2) - [Math]::Ceiling($this.RenderedContent[0].length / 2))
+        $renderPadY=([Math]::Max(0,([int]$this.drawHeight)/2) - [Math]::Ceiling($this.RenderedContent.count / 2))
+        foreach ($line in $this.RenderedContent) {
+            [System.Console]::SetCursorPosition($renderPadX,$renderPadY)
+            [System.Console]::Write($line)
+            $renderPadY++
+        }
+        [System.Console]::SetCursorPosition($this.originalCursorPosition.Item1,$this.originalCursorPosition.Item2)
+        [System.Console]::CursorVisible=$false
+        do{ $x=[System.Console]::ReadKey(“NoEcho, IncludeKeyUp”) } while( $x.Key -ne "F2" )
+    }
+
+}
+
 
 class messageBox {
     # this entire class makes me crave death
@@ -43,13 +139,14 @@ class messageBox {
     [bool]$CenteredTitle;
     [int]$Height;
     [int]$Width;
+
     hidden [int]$HostHeight=(Get-Host).UI.RawUI.BufferSize.Height
     hidden [int]$HostWidth=(Get-Host).UI.RawUI.BufferSize.Width
-    hidden [int]$BoundsX
-    hidden [int]$BoundsY
-    hidden [int]$maxDrawWidth=(($This.HostWidth/2) - 4)
+    hidden [int]$interiorWidth
+    #hidden [int]$interiorHeight
+    hidden [int]$maxDrawWidth=($This.HostWidth/2)
+    hidden [int]$maxInteriorWidth=$this.maxDrawWidth-4
     hidden [string[]]$Payload=@()
-    #hidden [int]$maxWidth
 
     messageBox( [string]$Title, [string]$Message) {$this.Title=$Title;$this.Message=$Message;$this.Buttons=@("`e[4mO`e[24mk");$this.CenteredTitle=$false}
     messageBox(
@@ -73,20 +170,10 @@ class messageBox {
         $this.CenteredTitle=$CenteredTitle
         if ($YesNo) {$this.Buttons=@("`e[4mY`e[24mes","`e[4mN`e[24mo")} else {$this.Buttons=@("Ok")}
     }
-    [int]getBounds() {
-        $this.BoundsX=$this.maxDrawWidth
-        <#
-        $tl=$This.Title.Length
-        if ($This.Message.Length -ge $this.maxDrawWidth) {
-            $ml=$this.maxDrawWidth
-            $this.BoundsX=$this.maxDrawWidth
-        } else { 
-            $ml=$This.Message.Length 
-            $this.BoundsX=$ml
-        } 
-        if ($ml -le $tl) {$this.BoundsX = $tl}
-        if (($ml -gt $tl) -and ($ml -lt $this.maxDrawWidth)) {$this.BoundsX=$ml+4}#>
-        return $this.BoundsX
+    [int]getBounds() {   
+        return 1
+    }
+    [void]processContent([string]$string) {
     }
     [hashtable]getPadding($string){
         if (($this.BoundsX - $string.length)/2 -like "*.*") {

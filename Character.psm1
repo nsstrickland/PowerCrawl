@@ -3,16 +3,16 @@
 # Created: Tuesday June 25th 2019
 # Author: nsstrickland
 # -----
-# Last Modified: Monday, 3rd October 2022 10:41:43 pm
+# Last Modified: Wednesday, 5th October 2022 8:53:47 pm
 # ----
 # .DESCRIPTION: PowerCrawl
 #
 #>
 
 #Requires -Version 7.2
-Using module enum.psm1 
-Using module Stats.psm1
-Using module Items.psm1
+Using module "./enum.psm1"
+Using module "./Stats.psm1"
+Using module "./Items.psm1"
 
 class ActionableStat {
     [stat]$Name
@@ -92,7 +92,7 @@ class StatEffect : Effect {
         return (-join $this.Stat.ToString()[0..2]+$retValue)
     }
 }
-
+  
 class StatBlock {
     [ActionableStat]$Strength;
     [ActionableStat]$Dexterity;
