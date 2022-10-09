@@ -3,7 +3,7 @@
 # Created: Monday October 3rd 2022
 # Author: Nick Strickland
 # -----
-# Last Modified: Friday, 7th October 2022 1:45:47 am
+# Last Modified: Sunday, 9th October 2022 2:40:04 am
 # ----
 # Copright 2022 Nick Strickland, nsstrickland@outlook.com>>
 # GNU General Public License v3.0 only - https://www.gnu.org/licenses/gpl-3.0-standalone.html
@@ -33,6 +33,24 @@ function Clear-ConsoleLine {
     [System.Console]::SetCursorPosition($Cur.Item1,$Cur.Item2)
 
 }
+    # SingleLineStyle = @{
+    #     TopLeft='┌';
+    #     TopRight='┐';
+    #     BottomLeft='└';
+    #     BottomRight='┘';
+    #     MiddleLeft='├';
+    #     Middle='─';
+    #     MiddleRight='┤';
+    # }
+    # DoubleLineStyle = @{
+    #     TopLeft='╔';
+    #     TopRight='╗';
+    #     BottomLeft='╚';
+    #     BottomRight='╝';
+    #     MiddleLeft='╠';
+    #     Middle='═';
+    #     MiddleRight='╣';
+    # }
 
 class contentBox {
     [int]$Height;
@@ -47,7 +65,7 @@ class contentBox {
     hidden [int]$drawWidth;
     hidden [int]$drawHeight=($This.HostHeight/2);
     contentBox([string]$Content){
-        $this.edgeCharacters=@('╔','╗','╚','╝','║','═')
+        $this.edgeCharacters=@('╔','╗','╚','╝','║','═','╠','╣')
         $this.processContent($Content)
         $this.addTitle()
         foreach ($line in $this.Content) {
@@ -55,8 +73,8 @@ class contentBox {
         }
         $this.addEnd()
     }
-    contentBox([string]$Title,[string]$Content){ #TODO: adjust width to title if content is shorter
-        $this.edgeCharacters=@('╔','╗','╚','╝','║','═')
+    contentBox([string]$Title,[string]$Content){
+        $this.edgeCharacters=@('╔','╗','╚','╝','║','═','╠','╣')
         $this.processContent($Content)
         $this.addTitle($title)
         foreach ($line in $this.Content) {
@@ -65,7 +83,7 @@ class contentBox {
         $this.addEnd()
     }
     contentBox(){
-        $this.edgeCharacters=@('╔','╗','╚','╝','║','═')
+        $this.edgeCharacters=@('╔','╗','╚','╝','║','═','╠','╣')
     }
     [void]processContent([string]$Content){
         $maxWidth=$this.maxInteriorWidth
@@ -84,7 +102,9 @@ class contentBox {
         $this.RenderedContent+=[string]($this.edgeCharacters[4]+$this.padString($string,' ')+$this.edgeCharacters[4])
     }
     [void]addTitle([string]$string){
-        $this.RenderedContent+=[string]($this.edgeCharacters[0]+($this.padString($string,'═'))+$this.edgeCharacters[1])
+        $this.RenderedContent+=[string]($this.edgeCharacters[0]+($this.edgeCharacters[5]*([int]$this.drawWidth))+$this.edgeCharacters[1])
+        $this.RenderedContent+=[string]($this.edgeCharacters[4]+($this.padString($string,' '))+$this.edgeCharacters[4])
+        $this.RenderedContent+=[string]($this.edgeCharacters[6]+($this.edgeCharacters[5]*([int]$this.drawWidth))+$this.edgeCharacters[7])
     }
     [void]addTitle(){
         $this.RenderedContent+=[string]($this.edgeCharacters[0]+($this.edgeCharacters[5]*([int]$this.drawWidth))+$this.edgeCharacters[1])
@@ -98,132 +118,75 @@ class contentBox {
     [string[]]ToString(){
         return [string[]]$this.RenderedContent
     }
-
 }
 
 class popupBox : contentBox {
+    [string[]]$buttons;
     hidden $originalCursorPosition;
+    hidden $oldText;
+    hidden [System.Management.Automation.Host.BufferCell[,]]$buffer;
     
     popupBox([string]$title,[string]$Content) {
         $this.processContent($Content)
         $this.addTitle($title)
-        $lineno=0
         foreach ($line in $this.Content) {
             $this.addBody($line)
         }
         $this.addEnd()
+        $this.buffer = New-Object 'System.Management.Automation.Host.BufferCell[,]' ($this.RenderedContent[0].Length),$this.RenderedContent.Count
+        $this.generateBuffer()
+    }
+    # popupBox([string]$title,[string]$Content,[string[]]$Buttons) {
+    #     $this.processContent($Content)
+    #     $this.addTitle($title)
+    #     foreach ($line in $this.Content) {
+    #         $this.addBody($line)
+    #     }
+    #     $this.addEnd()
+    # }
+    
+    generateBuffer() {
+        $tmp = [System.Management.Automation.Host.BufferCell[,]]::new(($this.RenderedContent.Count),($this.RenderedContent[0].Length))
+        for ($i = 0; $i -lt ($this.RenderedContent.Count); $i++) {
+            for ($j = 0; $j -lt ($this.RenderedContent[0].Length); $j++) {
+                $tmp[$i,$j]=[System.Management.Automation.Host.BufferCell]::new($this.RenderedContent[$i][$j],[System.ConsoleColor]'Gray',[System.ConsoleColor]'Black',[System.Management.Automation.Host.BufferCellType]'Complete')
+            }
+        }
+        $this.buffer=$tmp
+    }
+
+    [void]newrender() {
+        $this.originalCursorPosition=[System.Console]::GetCursorPosition()
+        $renderPadX=([Math]::Max(0,$this.HostWidth/2) - [Math]::Ceiling($this.RenderedContent[0].length / 2))
+        $renderPadY=([Math]::Max(0,([int]$this.HostHeight)/2) - [Math]::Ceiling($this.RenderedContent.count / 2))
+        
+        $rectangle = [System.Management.Automation.Host.Rectangle]::new($renderPadX,$renderPadY,($renderPadX+$this.RenderedContent[0].Length),($renderPadY+$this.RenderedContent.Count))
+        $bufferSection = (Get-Host).UI.RawUI.GetBufferContents($rectangle)
+
     }
 
     [void]render() {
         $this.originalCursorPosition=[System.Console]::GetCursorPosition()
         $renderPadX=([Math]::Max(0,$this.HostWidth/2) - [Math]::Ceiling($this.RenderedContent[0].length / 2))
-        $renderPadY=([Math]::Max(0,([int]$this.drawHeight)/2) - [Math]::Ceiling($this.RenderedContent.count / 2))
-        foreach ($line in $this.RenderedContent) {
-            [System.Console]::SetCursorPosition($renderPadX,$renderPadY)
-            [System.Console]::Write($line)
-            $renderPadY++
-        }
+        $renderPadY=([Math]::Max(0,([int]$this.HostHeight)/2) - [Math]::Ceiling($this.RenderedContent.count / 2))
+
+        #Start old string capture
+        $rectangle = [System.Management.Automation.Host.Rectangle]::new($renderPadX,$renderPadY,($renderPadX+$this.RenderedContent[0].Length),($renderPadY+$this.RenderedContent.Count))
+        $bufferSection = (Get-Host).UI.RawUI.GetBufferContents($rectangle)
+        $this.oldText=$bufferSection
+        (Get-Host).UI.RawUI.SetBufferContents([System.Management.Automation.Host.Coordinates]::new($renderPadX,$renderPadY),$this.buffer)
         [System.Console]::SetCursorPosition($this.originalCursorPosition.Item1,$this.originalCursorPosition.Item2)
         [System.Console]::CursorVisible=$false
-        do{ $x=[System.Console]::ReadKey(“NoEcho, IncludeKeyUp”) } while( $x.Key -ne "F2" )
+        do{ $x=[System.Console]::ReadKey(“NoEcho, IncludeKeyUp”) } while($null -eq $x)
+        $this.deRender()
     }
-
-}
-
-
-class messageBox {
-    # this entire class makes me crave death
-    [string]$Title;
-    [string]$Message;
-    [string[]]$Buttons;
-    [bool]$CenteredTitle;
-    [int]$Height;
-    [int]$Width;
-
-    hidden [int]$HostHeight=(Get-Host).UI.RawUI.BufferSize.Height
-    hidden [int]$HostWidth=(Get-Host).UI.RawUI.BufferSize.Width
-    hidden [int]$interiorWidth
-    #hidden [int]$interiorHeight
-    hidden [int]$maxDrawWidth=($This.HostWidth/2)
-    hidden [int]$maxInteriorWidth=$this.maxDrawWidth-4
-    hidden [string[]]$Payload=@()
-
-    messageBox( [string]$Title, [string]$Message) {$this.Title=$Title;$this.Message=$Message;$this.Buttons=@("`e[4mO`e[24mk");$this.CenteredTitle=$false}
-    messageBox(
-        [string]$Title,
-        [string]$Message,
-        [bool]$YesNo #Change the default button from "Ok" to "Yes" and "No"
-    ) {
-        $this.Title=$Title;
-        $this.Message=$Message;
-        $this.CenteredTitle=$false;
-        if ($YesNo) {$this.Buttons=@("`e[4mY`e[24mes","`e[4mN`e[24mo")} else {$this.Buttons=@("`e[4mO`e[24mk")}
+    [void]deRender() {
+        $renderPadX=([Math]::Max(0,$this.HostWidth/2) - [Math]::Ceiling($this.RenderedContent[0].length / 2))
+        $renderPadY=([Math]::Max(0,([int]$this.HostHeight)/2) - [Math]::Ceiling($this.RenderedContent.count / 2))
+        #$rectangle = [System.Management.Automation.Host.Rectangle]::new($renderPadX,$renderPadY,($renderPadX+$this.RenderedContent[0].Length),($renderPadY+$this.RenderedContent.Count))
+        #(Get-Host).UI.RawUI.SetBufferContents([System.Management.Automation.Host.Rectangle]$rectangle,$this.oldText)
+        # ↑ Broken; Opened PowerShell/issues/18239 in response 
+        (Get-Host).UI.RawUI.SetBufferContents([System.Management.Automation.Host.Coordinates]::new($renderPadX,$renderPadY),$this.oldText)
+        [System.Console]::SetCursorPosition($this.originalCursorPosition.Item1,$this.originalCursorPosition.Item2)
     }
-    messageBox(
-        [string]$Title,
-        [string]$Message,
-        [bool]$YesNo, #Change the default button from "Ok" to "Yes" and "No"
-        [bool]$CenteredTitle
-    ) {
-        $this.Title=$Title;
-        $this.Message=$Message;
-        $this.CenteredTitle=$CenteredTitle
-        if ($YesNo) {$this.Buttons=@("`e[4mY`e[24mes","`e[4mN`e[24mo")} else {$this.Buttons=@("Ok")}
-    }
-    [int]getBounds() {   
-        return 1
-    }
-    [void]processContent([string]$string) {
-    }
-    [hashtable]getPadding($string){
-        if (($this.BoundsX - $string.length)/2 -like "*.*") {
-            [string]$leftPad=' ' * ([math]::Truncate(($this.BoundsX - $string.length)/2))
-            [string]$rightPad=' ' * ([math]::Truncate(($this.BoundsX - $string.length)/2)+1)
-        } else {
-            [string]$leftPad=' ' * ([math]::Truncate(($this.BoundsX - $string.length)/2))
-            [string]$rightPad=$leftPad
-        }
-        if ($leftPad.Length -le 2) {$leftPad=' '}
-        if ($rightPad.Length -le 2) {$rightPad=' '}
-
-        return @{Left=$leftPad;Right=$rightPad}
-    }
-    [string]padString([string]$string,[string]$padChar) {
-        return [string]("{0}{1}{0}" -f ($padChar*(([Math]::Max(0,$this.BoundsX/2) - [Math]::Floor($string.length / 2)))),$string)
-    }
-    [string[]]Process() {
-        $this.getBounds()
-        [string[]]$out=@()
-        # Title
-        # $titlePad=$this.getPadding($this.Title)
-        # if ($this.CenteredTitle) {
-        #     $out+=[string]("╔═"+$titlePad.Left.replace(' ','═')+$this.Title+$titlePad.Right.replace(' ','═')+"═╗")
-        # } else {
-        #     $out+=[string]("╔═"+$this.Title+$titlePad.Left.replace(' ','═')+$titlePad.Right.replace(' ','═')+"═╗")
-        # }
-        if ($this.Message.Length -gt $this.BoundsX) {
-            $maxWidth = $this.BoundsX - 2
-            [string[]]$messages = $this.Message -split "(.{$maxWidth})" | Where-Object {$_}
-        } else {[string[]]$messages=$this.Message}
-        # $out+=[string]('║'+(' ' * ($this.BoundsX+2))+'║')
-        # foreach ($line in $messages) {
-        #     $pad=$null;$pad=$this.getPadding($line.trim())
-        #     $out+=[string]('║ '+$pad.Left+$line.trim()+$pad.Right+' ║')
-        # }
-        # $out+=[string]('║'+(' ' * ($this.BoundsX+2))+'║')
-        # $buttonPad=$this.getPadding([string]$this.Buttons)
-        $button = [string]($this.Buttons | ForEach-Object {
-            return $PSItem.Insert(1,"`e[24m").Insert(0,"`e[4m")
-        })
-        # $out+=[string]('║ '+$buttonPad.Left+$button+$buttonPad.Right+' ║')
-        # $out+=[string]('╚'+('═' * ($this.BoundsX+2))+'╝')
-        $out+=[string]('╔═'+$this.padString($this.Title,'═')+'═╗')
-        $out+=[string]('║ '+$this.padString('',' ')+' ║')
-        foreach ($line in $messages) {
-            $out+=[string]('║ '+$this.padString($line,' ')+' ║')
-        }
-        $out+=[string]('║ '+$this.padString($button,' ')+' ║')
-        return $out
-    }
-
 }
