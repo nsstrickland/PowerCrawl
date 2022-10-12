@@ -3,58 +3,17 @@
 # Created: Monday October 3rd 2022
 # Author: Nick Strickland
 # -----
-# Last Modified: Sunday, 9th October 2022 2:40:04 am
+# Last Modified: Sunday, 9th October 2022 3:51:37 pm
 # ----
 # Copright 2022 Nick Strickland, nsstrickland@outlook.com>>
 # GNU General Public License v3.0 only - https://www.gnu.org/licenses/gpl-3.0-standalone.html
 #>
 
 
-function Set-ConsoleLine {
-    [CmdletBinding()]
-    param (
-        [parameter (Mandatory=$true)]
-        [int]$Line,
-        [parameter (Mandatory=$true)]
-        [psobject]$InputObject
-    )
-}
-
-function Clear-ConsoleLine {
-    [CmdletBinding()]
-    param (
-        [parameter (Mandatory=$true)]
-        [int]$Line
-    )
-    $ConsoleWidth=$host.ui.RawUI.BufferSize.Width;
-    $Cur=[System.Console]::GetCursorPosition()
-    [System.Console]::SetCursorPosition(0,$Line);
-    [System.Console]::Write("{0,-$ConsoleWidth}" -f " ")
-    [System.Console]::SetCursorPosition($Cur.Item1,$Cur.Item2)
-
-}
-    # SingleLineStyle = @{
-    #     TopLeft='┌';
-    #     TopRight='┐';
-    #     BottomLeft='└';
-    #     BottomRight='┘';
-    #     MiddleLeft='├';
-    #     Middle='─';
-    #     MiddleRight='┤';
-    # }
-    # DoubleLineStyle = @{
-    #     TopLeft='╔';
-    #     TopRight='╗';
-    #     BottomLeft='╚';
-    #     BottomRight='╝';
-    #     MiddleLeft='╠';
-    #     Middle='═';
-    #     MiddleRight='╣';
-    # }
-
 class contentBox {
     [int]$Height;
     [int]$Width;
+    [string]$Title
     [string[]]$Content;
     [string[]]$RenderedContent;
     hidden [string[]]$edgeCharacters;
@@ -75,6 +34,7 @@ class contentBox {
     }
     contentBox([string]$Title,[string]$Content){
         $this.edgeCharacters=@('╔','╗','╚','╝','║','═','╠','╣')
+        $this.Title = $Title
         $this.processContent($Content)
         $this.addTitle($title)
         foreach ($line in $this.Content) {
@@ -93,6 +53,20 @@ class contentBox {
                $this.Content=$Content
                 $this.drawWidth=[int]($Content.Length + 4)
         }
+    }
+    [void]reProcessContent() {
+        $this.RenderedContent=$null
+        [string[]]$this.RenderedContent
+        $this.processContent([string]$this.Content)
+        if ($this.Title) {
+            $this.addTitle($this.Title)
+        } else {
+            $this.addTitle()
+        }
+        foreach ($line in $this.Content) {
+            $this.addBody($line)
+        }
+        $this.addEnd()
     }
     [string]padString([string]$string,[string]$padChar) {
         [int]$pad=([Math]::Max(0,$this.drawWidth/2) - [Math]::Ceiling($string.length / 2))
@@ -116,7 +90,22 @@ class contentBox {
         $this.RenderedContent+=[string]($this.edgeCharacters[2]+($this.edgeCharacters[5]*($this.drawWidth))+$this.edgeCharacters[3])
     }
     [string[]]ToString(){
+        if ($this.bufferChanged()) {$this.reProcessContent()}
         return [string[]]$this.RenderedContent
+    }
+    [bool]bufferChanged() {
+        $HH=(Get-Host).UI.RawUI.BufferSize.Height
+        $HW=(Get-Host).UI.RawUI.BufferSize.Width
+        if (($this.HostHeight -ne $HH) -or ($this.HostWidth -ne $HW)) {
+            $this.HostHeight=$HH;
+            $this.HostWidth=$HW;
+            $this.maxDrawWidth=($This.HostWidth/2);
+            $this.maxInteriorWidth=$this.maxDrawWidth-4;
+            $this.drawHeight=($This.HostHeight/2);
+            return 1
+        } else {
+            return 0
+        }
     }
 }
 
@@ -127,6 +116,7 @@ class popupBox : contentBox {
     hidden [System.Management.Automation.Host.BufferCell[,]]$buffer;
     
     popupBox([string]$title,[string]$Content) {
+        $this.Title=$title
         $this.processContent($Content)
         $this.addTitle($title)
         foreach ($line in $this.Content) {
@@ -155,17 +145,15 @@ class popupBox : contentBox {
         $this.buffer=$tmp
     }
 
-    [void]newrender() {
-        $this.originalCursorPosition=[System.Console]::GetCursorPosition()
-        $renderPadX=([Math]::Max(0,$this.HostWidth/2) - [Math]::Ceiling($this.RenderedContent[0].length / 2))
-        $renderPadY=([Math]::Max(0,([int]$this.HostHeight)/2) - [Math]::Ceiling($this.RenderedContent.count / 2))
-        
-        $rectangle = [System.Management.Automation.Host.Rectangle]::new($renderPadX,$renderPadY,($renderPadX+$this.RenderedContent[0].Length),($renderPadY+$this.RenderedContent.Count))
-        $bufferSection = (Get-Host).UI.RawUI.GetBufferContents($rectangle)
-
-    }
-
     [void]render() {
+        write-host $this.RenderedContent[0].Length
+        if ($this.bufferChanged()) {
+            $this.reProcessContent()
+            Start-Sleep -Milliseconds 100
+            $this.buffer = New-Object 'System.Management.Automation.Host.BufferCell[,]' ($this.RenderedContent[0].Length),$this.RenderedContent.Count
+            $this.generateBuffer()
+        }
+        write-host $this.RenderedContent[0].Length
         $this.originalCursorPosition=[System.Console]::GetCursorPosition()
         $renderPadX=([Math]::Max(0,$this.HostWidth/2) - [Math]::Ceiling($this.RenderedContent[0].length / 2))
         $renderPadY=([Math]::Max(0,([int]$this.HostHeight)/2) - [Math]::Ceiling($this.RenderedContent.count / 2))
@@ -189,4 +177,5 @@ class popupBox : contentBox {
         (Get-Host).UI.RawUI.SetBufferContents([System.Management.Automation.Host.Coordinates]::new($renderPadX,$renderPadY),$this.oldText)
         [System.Console]::SetCursorPosition($this.originalCursorPosition.Item1,$this.originalCursorPosition.Item2)
     }
+
 }
